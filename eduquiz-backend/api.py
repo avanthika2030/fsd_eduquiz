@@ -14,6 +14,7 @@ from groq import Groq
 from fastapi import Depends, HTTPException
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from auth import verify_token
+from typing import List, Optional
 
 load_dotenv()
 api_key = os.getenv("GROQ_API_KEY")
@@ -29,6 +30,10 @@ app.add_middleware(
 )
 class VideoRequest(BaseModel):
     url: str
+    bloom_levels: Optional[List[str]] = ["Remember", "Understand", "Apply"]
+    difficulty: Optional[str] = "Medium"
+    num_questions: Optional[int] = 5
+    model: Optional[str] = "llama-3.3-70b-versatile" 
 
 Base.metadata.create_all(bind=engine)
 class UserCreate(BaseModel):
@@ -52,19 +57,20 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
 
 @app.post("/generate-quiz")
 def generate_quiz(data: VideoRequest, user: str = Depends(get_current_user)):
+    
     try:
         
 
         rag = RAGEngine()
         chunks, title, metadata = rag.process_video(data.url)
 
-        qgen = QuizGenerator(api_key)
+        qgen = QuizGenerator(api_key, model=data.model) 
 
         questions = qgen.generate_quiz(
             rag_engine=rag,
-            num_questions=5,
-            bloom_levels=["Remember", "Understand", "Apply"],
-            difficulty="Medium"
+            num_questions=data.num_questions,
+            bloom_levels=data.bloom_levels,
+            difficulty=data.difficulty
         )
         client = Groq(api_key=api_key)
 
@@ -93,6 +99,7 @@ def generate_quiz(data: VideoRequest, user: str = Depends(get_current_user)):
             "questions": questions,
             "summary": summary
         }
+        
 
     except Exception as e:
         return {"error": str(e)}
