@@ -69,10 +69,19 @@ export default function Dashboard() {
 
   const email = localStorage.getItem("userEmail") || "student";
 
-  const loadResults = () => {
-    const stored = JSON.parse(localStorage.getItem("quizResults")) || [];
-    setResults(stored);
-  };
+  const loadResults = async () => {
+  try {
+    const userEmail = localStorage.getItem("userEmail");
+
+    const res = await fetch(`${API}/history/${userEmail}`);
+    const data = await res.json();
+
+    setResults(data);
+  } catch (err) {
+    console.error("Error loading history:", err);
+    setResults([]);
+  }
+};
 
   useEffect(() => {
     loadResults();
@@ -161,8 +170,13 @@ export default function Dashboard() {
     pct: Math.round((r.score / r.total) * 100),
   }));
   const avgScore = results.length
-    ? (results.reduce((a, b) => a + b.score, 0) / results.length).toFixed(1) : 0;
-  const best = results.length ? Math.max(...results.map((r) => r.score)) : 0;
+  ? (results.reduce((a, b) => a + Math.round((b.score / b.total) * 100), 0) / results.length).toFixed(1)
+  : 0;
+
+// Best score as best percentage
+const best = results.length
+  ? Math.max(...results.map((r) => Math.round((r.score / r.total) * 100)))
+  : 0;
   let streak = 0;
   for (let i = results.length - 1; i >= 0; i--) {
     if (results[i].score >= Math.ceil(results[i].total / 2)) streak++;
@@ -258,8 +272,8 @@ export default function Dashboard() {
 
               <div className="quick-stats">
                 <div className="qs-card"><span className="qs-val">{results.length}</span><span className="qs-label">Total Quizzes</span></div>
-                <div className="qs-card"><span className="qs-val">{avgScore}</span><span className="qs-label">Avg Score</span></div>
-                <div className="qs-card"><span className="qs-val">{best}</span><span className="qs-label">Best Score</span></div>
+                <div className="qs-card"><span className="qs-val">{avgScore}%</span><span className="qs-label">Avg Score</span></div>
+                <div className="qs-card"><span className="qs-val">{best}%</span><span className="qs-label">Best Score</span></div>
                 <div className="qs-card streak"><span className="qs-val">🔥 {streak}</span><span className="qs-label">Win Streak</span></div>
               </div>
 
@@ -272,7 +286,7 @@ export default function Dashboard() {
                       <XAxis dataKey="name" tick={{ fill: "#606078", fontSize: 11 }} axisLine={false} tickLine={false} />
                       <YAxis tick={{ fill: "#606078", fontSize: 11 }} axisLine={false} tickLine={false} />
                       <Tooltip contentStyle={{ background: "#13131f", border: "1px solid rgba(139,92,246,0.2)", borderRadius: 8, fontSize: 12 }} labelStyle={{ color: "#a0a0b8" }} itemStyle={{ color: "#c4b5fd" }} />
-                      <Line type="monotone" dataKey="score" stroke="#8b5cf6" strokeWidth={2} dot={{ fill: "#8b5cf6", r: 3 }} />
+                      <Line type="monotone" dataKey="pct" stroke="#8b5cf6" strokeWidth={2} dot={{ fill: "#8b5cf6", r: 3 }} />
                     </LineChart>
                   </ResponsiveContainer>
                 </div>

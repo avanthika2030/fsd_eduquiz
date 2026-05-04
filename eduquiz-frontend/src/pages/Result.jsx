@@ -22,19 +22,49 @@ export default function Result() {
     { label: "Keep Practicing", color: "#f87171", bg: "rgba(248,113,113,0.08)" };
 
   useEffect(() => {
-    if (!saved.current && questions.length > 0) {
-      saved.current = true;
-      const quizData = JSON.parse(localStorage.getItem("quizData")) || {};
-      const stored = JSON.parse(localStorage.getItem("quizResults")) || [];
-      stored.push({
-        score,
-        total: questions.length,
-        date: new Date().toISOString(),
-        title: quizData.title || "Untitled Quiz",
-      });
-      localStorage.setItem("quizResults", JSON.stringify(stored));
-    }
-  }, []);
+  if (!saved.current && questions.length > 0) {
+    saved.current = true;
+
+    const quizData = JSON.parse(localStorage.getItem("quizData")) || {};
+    const stored = JSON.parse(localStorage.getItem("quizResults")) || [];
+
+    const newEntry = {
+      score,
+      total: questions.length,
+      date: new Date().toISOString(),
+      title: quizData.title || "Untitled Quiz",
+    };
+
+    // 🔹 keep localStorage (optional, for quick UI)
+    stored.push(newEntry);
+    localStorage.setItem("quizResults", JSON.stringify(stored));
+
+    // 🔥 ADD THIS PART (backend save)
+    const saveHistory = async () => {
+      try {
+        const userEmail = localStorage.getItem("userEmail"); // make sure you store this during login
+
+        await fetch("http://localhost:8000/save-history", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            email: userEmail,
+            video_url: quizData.video_url || "",
+            title: newEntry.title,
+            score: score,
+            total: questions.length,
+          }),
+        });
+      } catch (err) {
+        console.error("Failed to save history:", err);
+      }
+    };
+
+    saveHistory();
+  }
+}, []);
 
   return (
     <div className="result-root">

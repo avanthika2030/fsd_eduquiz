@@ -123,8 +123,28 @@ from notes import update_note
 def edit_note(data: NoteUpdate, user: str = Depends(get_current_user)):
     return update_note(data.id, data.content)
 ##################
+from history import save_history, get_history, get_analytics
+
+@app.post("/save-history")
+def save_history_api(data: dict):
+    return save_history(
+        data["email"],
+        data["video_url"],
+        data["title"],
+        data["score"],
+        data["total"]
+    )
+
+@app.get("/history/{email}")
+def history_api(email: str):
+    return get_history(email)
+
+@app.get("/analytics/{email}")
+def analytics_api(email: str):
+    return get_analytics(email)
 
 
+##################
 @app.post("/register")
 def register(user: UserCreate):
     return create_user(user.email, user.password)

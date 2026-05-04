@@ -11,11 +11,15 @@ Handles:
 
 import re
 from typing import List, Tuple, Dict
-
+import os
 from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api.formatters import TextFormatter
 from sentence_transformers import SentenceTransformer
 import faiss
+import logging
+import warnings
+logging.getLogger("transformers").setLevel(logging.ERROR)
+warnings.filterwarnings("ignore", module="transformers")
 
 
 class RAGEngine:
@@ -68,72 +72,193 @@ class RAGEngine:
     # ── Private helpers ───────────────────────────────────────────────────────
 
     def _fetch_transcript(self, video_id: str) -> Tuple[str, Dict]:
-        """
-        Fetch transcript with full compatibility:
-          - youtube-transcript-api v2.x  (instance-based, api.fetch())
-          - youtube-transcript-api v0.x  (class-method, list_transcripts())
-        """
-        # ── Attempt 1: v2.x instance API ─────────────────────────────────────
+        errors = []
+        ytt_api = YouTubeTranscriptApi()
+
+        # Attempt 1: fetch() English
         try:
-            ytt_api  = YouTubeTranscriptApi()
-            fetched  = ytt_api.fetch(video_id)
-            snippets = list(fetched)
-            text     = " ".join(
-                (s.text if hasattr(s, "text") else s.get("text", ""))
-                for s in snippets
-            )
+            fetched = ytt_api.fetch(video_id, languages=["en"])
+            text = " ".join(s.text for s in fetched)
             if text.strip():
-                metadata = {
-                    "video_id":     video_id,
-                    "language":     getattr(fetched, "language", "en"),
+                return text, {
+                    "video_id": video_id,
+                    "language": getattr(fetched, "language_code", "en"),
                     "is_generated": getattr(fetched, "is_generated", True),
-                    "title":        f"Video {video_id}",
+                    "title": f"Video {video_id}",
                 }
-                return text, metadata
-        except Exception:
-            pass  # fall through to v0.x path
-
-        # ── Attempt 2: v0.x class-method API ─────────────────────────────────
-        try:
-            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-            try:
-                transcript = transcript_list.find_manually_created_transcript(["en"])
-            except Exception:
-                try:
-                    transcript = transcript_list.find_generated_transcript(["en"])
-                except Exception:
-                    transcript = next(iter(transcript_list))
-
-            raw       = transcript.fetch()
-            formatter = TextFormatter()
-            text      = formatter.format_transcript(raw)
-            metadata  = {
-                "video_id":     video_id,
-                "language":     transcript.language,
-                "is_generated": transcript.is_generated,
-                "title":        f"Video {video_id}",
-            }
-            return text, metadata
-        except Exception:
-            pass
-
-        # ── Attempt 3: simplest v0.x fallback ────────────────────────────────
-        try:
-            raw_list  = YouTubeTranscriptApi.get_transcript(video_id)
-            text      = " ".join(item.get("text", "") for item in raw_list)
-            metadata  = {
-                "video_id":     video_id,
-                "language":     "en",
-                "is_generated": True,
-                "title":        f"Video {video_id}",
-            }
-            return text, metadata
+            errors.append("Attempt 1: empty text")
         except Exception as e:
-            raise RuntimeError(
-                f"Could not fetch transcript for video '{video_id}'.\n"
-                f"Make sure the video has captions enabled.\n\nDetails: {e}"
-            )
+            errors.append(f"Attempt 1 (fetch en): {type(e).__name__}: {e}")
 
+        # Attempt 2: fetch() any language
+        try:
+            transcript_list = ytt_api.list(video_id)
+            transcript = transcript_list.find_transcript(["en"])
+            fetched = transcript.fetch()
+            text = " ".join(s.text for s in fetched)
+            if text.strip():
+                return text, {
+                    "video_id": video_id,
+                    "language": getattr(transcript, "language_code", "en"),
+                    "is_generated": getattr(transcript, "is_generated", True),
+                    "title": f"Video {video_id}",
+                }
+            errors.append("Attempt 2: empty text")
+        except Exception as e:
+            errors.append(f"Attempt 2 (list en): {type(e).__name__}: {e}")
+
+        # Attempt 3: any available transcript
+        try:
+            transcript_list = ytt_api.list(video_id)
+            transcript = next(iter(transcript_list))
+            fetched = transcript.fetch()
+            text = " ".join(s.text for s in fetched)
+            if text.strip():
+                return text, {
+                    "video_id": video_id,
+                    "language": getattr(transcript, "language_code", "unknown"),
+                    "is_generated": getattr(transcript, "is_generated", True),
+                    "title": f"Video {video_id}",
+                }
+            errors.append("Attempt 3: empty text")
+        except Exception as e:
+            errors.append(f"Attempt 3 (any lang): {type(e).__name__}: {e}")
+
+
+        # ── Attempt 4: Whisper fallback (NOW WORKS) ───────
+        try:
+            import shutil
+            import yt_dlp
+            import whisper
+
+            ffmpeg_path = shutil.which("ffmpeg")
+            if not ffmpeg_path:
+                raise RuntimeError(
+                    "Whisper fallback requires `ffmpeg`, but it was not found on PATH."
+                )
+
+            audio_base = f"{video_id}"
+            audio_file = f"{audio_base}.mp3"
+
+            # Optional: help avoid YouTube bot checks by using a cookie file exported locally.
+            # Set either of these env vars:
+            #   - YTDLP_COOKIEFILE="C:\\path\\to\\cookies.txt"
+            #   - YTDLP_COOKIES="C:\\path\\to\\cookies.txt"
+            cookiefile = os.getenv("YTDLP_COOKIEFILE") or os.getenv("YTDLP_COOKIES")
+            if not cookiefile:
+                # Convenience fallback: allow dropping a `cookies.txt` next to `app.py`
+                # so the fallback works without env configuration.
+                candidates = [
+                    os.path.join(os.getcwd(), "cookies.txt"),
+                    os.path.join(os.path.dirname(__file__), "cookies.txt"),
+                ]
+                for c in candidates:
+                    if os.path.exists(c):
+                        cookiefile = c
+                        break
+
+            # Base yt-dlp options. We do format selection in a small retry loop below
+            # because some YouTube challenges may hide certain "audio only" formats.
+            ydl_opts = {
+                "outtmpl": audio_base,
+                "quiet": True,
+                "noplaylist": True,
+                "retries": 10,
+                "fragment_retries": 10,
+                "extractor_retries": 10,
+                "socket_timeout": 30,
+                # Enable EJS challenge helpers when needed (fixes cases where some formats
+                # show up as "images only" due to signature/decryption problems).
+                # If your yt-dlp already has these components, this is harmless.
+                "remote_components": ["ejs:github"],
+                # Hint: yt-dlp will use whatever JS runtime is available; deno is often pre-enabled,
+                # but node can improve success rate. Add both; yt-dlp will ignore missing runtimes.
+                "jsruntimes": ["node", "deno"],
+                # Ensure we end up with a predictable `.mp3` file that Whisper can decode.
+                "postprocessors": [
+                    {
+                        "key": "FFmpegExtractAudio",
+                        "preferredcodec": "mp3",
+                        "preferredquality": "192",
+                    }
+                ],
+            }
+
+            if cookiefile:
+                ydl_opts["cookiefile"] = cookiefile
+
+            try:
+                youtube_url = f"https://www.youtube.com/watch?v={video_id}"
+                # Try audio-only first; if not available (due to challenge/decrypt issues),
+                # fall back to downloading the best combined stream and extracting audio.
+                download_error: Exception | None = None
+                for format_spec in ["bestaudio/best", "best"]:
+                    ydl_opts["format"] = format_spec
+                    # Clean up between attempts (prevents stale partial files).
+                    if os.path.exists(audio_file):
+                        try:
+                            os.remove(audio_file)
+                        except Exception:
+                            pass
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        try:
+                            ydl.download([youtube_url])
+                        except Exception as e:
+                            download_error = e
+                            continue
+                    # If download succeeded, the postprocessor should create the mp3.
+                    if os.path.exists(audio_file):
+                        break
+
+                if not os.path.exists(audio_file):
+                    raise RuntimeError(
+                        f"yt-dlp finished without creating audio file '{audio_file}'. "
+                        f"Last error: {download_error}"
+                    )
+
+                model = whisper.load_model("base")
+                result = model.transcribe(audio_file)
+
+                text = result.get("text", "") if isinstance(result, dict) else ""
+
+                return text, {
+                    "video_id": video_id,
+                    "language": "auto",
+                    "is_generated": True,
+                    "title": f"Video {video_id} (Whisper)",
+                }
+            finally:
+                if os.path.exists(audio_file):
+                    os.remove(audio_file)
+
+        except ModuleNotFoundError as e:
+            raise RuntimeError(
+                "Whisper fallback prerequisites are missing. "
+                "Install `openai-whisper` and `yt-dlp` (and `ffmpeg` for audio decoding). "
+                f"Missing module: {e.name}"
+            ) from e
+        except Exception as e:
+            msg = str(e).lower()
+
+            hint_parts = []
+            if "ffmpeg" in msg and "path" in msg:
+                hint_parts.append("Install `ffmpeg` and make sure `ffmpeg` is on your PATH.")
+            if "429" in msg or "too many requests" in msg:
+                hint_parts.append(
+                    "YouTube is rate-limiting or blocking yt-dlp. Wait a bit and retry, or set `YTDLP_COOKIEFILE` "
+                    "to a cookies.txt export to bypass bot checks."
+                )
+            if "sign in to confirm" in msg or "not a bot" in msg:
+                hint_parts.append(
+                    "yt-dlp is being blocked by YouTube. Export cookies to a file and set `YTDLP_COOKIEFILE` "
+                    "(or `YTDLP_COOKIES`) so yt-dlp can authenticate."
+                )
+
+            hint = ("\nHint: " + " ".join(hint_parts)) if hint_parts else ""
+            raise RuntimeError(
+                f"All transcript methods failed for '{video_id}'.\nDetails: {e}{hint}"
+            ) from e
+        
     def _chunk_text(self, text: str) -> List[str]:
         words  = text.split()
         chunks = []
