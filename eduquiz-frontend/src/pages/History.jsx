@@ -8,7 +8,7 @@ export default function History() {
       try {
         const userEmail = localStorage.getItem("userEmail");
 
-        const res = await fetch(`http://localhost:8000/history/${userEmail}`);
+        const res = await fetch(`http://localhost:5000/api/history/${userEmail}`);
         const data = await res.json();
 
         setHistory(data);

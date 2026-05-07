@@ -4,7 +4,7 @@ import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
 } from "recharts";
 
-const API = "http://127.0.0.1:8000";
+const API = "http://127.0.0.1:5000/api";
 
 const NAV_ITEMS = [
   { icon: "◈", label: "Generate", id: "generate" },
@@ -110,7 +110,7 @@ export default function Dashboard() {
     }, 2500);
 
     try {
-      const res = await authFetch("/generate-quiz", {
+      const res = await authFetch("/quiz/generate", {
         method: "POST",
         body: JSON.stringify({
           url: url.trim(),

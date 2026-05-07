@@ -1,7 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import { useState } from "react";
 
-const API = "http://127.0.0.1:8000";
+const API = "http://127.0.0.1:5000/api/auth";
 
 export default function Login() {
   const navigate = useNavigate();

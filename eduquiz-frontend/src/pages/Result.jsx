@@ -44,7 +44,7 @@ export default function Result() {
       try {
         const userEmail = localStorage.getItem("userEmail"); // make sure you store this during login
 
-        await fetch("http://localhost:8000/save-history", {
+        await fetch("http://localhost:5000/api/history/save", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
