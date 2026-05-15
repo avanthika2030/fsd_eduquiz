@@ -15,6 +15,7 @@ from fastapi import Depends, HTTPException
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from auth import verify_token
 from typing import List, Optional
+from auth import reset_password
 
 load_dotenv()
 api_key = os.getenv("GROQ_API_KEY")
@@ -43,6 +44,10 @@ class UserCreate(BaseModel):
 class UserLogin(BaseModel):
     email: str
     password: str
+
+class ResetPassword(BaseModel):
+    email: str
+    new_password: str
 
 security = HTTPBearer()
 
@@ -77,7 +82,7 @@ def generate_quiz(data: VideoRequest, user: str = Depends(get_current_user)):
         preview_text = " ".join(chunks[:3])[:1200]
 
         response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",  # or selected_model
+            model="llama-3.3-70b-versatile", 
             messages=[
                 {
                     "role": "system",
@@ -152,3 +157,7 @@ def register(user: UserCreate):
 @app.post("/login")
 def login(user: UserLogin):
     return authenticate_user(user.email, user.password)
+
+@app.post("/reset-password")
+def reset_password_api(data: ResetPassword):
+    return reset_password(data.email, data.new_password)

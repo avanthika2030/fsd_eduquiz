@@ -6,6 +6,7 @@ import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import Quiz from "./pages/Quiz";
 import Result from "./pages/Result";
+import ForgotPassword from "./pages/ForgotPassword";
 
 function ProtectedRoute({ children }) {
   const token = localStorage.getItem("token");
@@ -19,6 +20,7 @@ function App() {
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/login" element={<Login />} />
+        <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/dashboard" element={
           <ProtectedRoute><Dashboard /></ProtectedRoute>
         } />

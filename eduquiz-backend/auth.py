@@ -93,7 +93,31 @@ def authenticate_user(email, password):
 
     db.close()
 
+
     return {
         "access_token": token,
         "token_type": "bearer"
     }
+
+def reset_password(email, new_password):
+
+    db = SessionLocal()
+
+    user = db.query(User).filter(User.email == email).first()
+
+    if not user:
+        db.close()
+        return {"error": "User not found"}
+
+    pwd_error = validate_password(new_password)
+
+    if pwd_error:
+        db.close()
+        return {"error": pwd_error}
+
+    user.password = hash_password(new_password)
+
+    db.commit()
+    db.close()
+
+    return {"message": "Password updated successfully"}

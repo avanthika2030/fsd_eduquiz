@@ -112,6 +112,13 @@ export default function Login() {
           />
         </div>
 
+        <p
+          className="forgot-link"
+          onClick={() => navigate("/forgot-password")}
+        >
+          Forgot Password?
+        </p>
+
         {error && <div className="alert alert-error">{error}</div>}
         {success && <div className="alert alert-success">{success}</div>}
 
@@ -140,6 +147,20 @@ export default function Login() {
           justify-content: center;
           font-family: 'DM Sans', sans-serif;
           position: relative;
+        }
+
+        .forgot-link {
+          margin-top: 10px;
+          text-align: right;
+          font-size: 13px;
+          color: #a78bfa;
+          cursor: pointer;
+          transition: 0.2s;
+        }
+
+        .forgot-link:hover {
+          color: #c4b5fd;
+          text-decoration: underline;
         }
 
         .login-bg {
